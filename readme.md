@@ -1,3 +1,9 @@
+> **Fork note (AI maintenance)**
+> Upstream: [NotRexed/Hookshot](https://github.com/NotRexed/Hookshot).
+> Change: experimental native-only FMA32/FMA64 in the lifted game code; no ARM FPCR/FPSR guard or soft-float fallback for these FMA operations.
+> Code: `nx2/native_fma.py`, installed by `nx2/lift.py`. Requires x86 FMA (`-march=x86-64-v3`); non-FMA targets fail compilation.
+> Not validated by a game build or runtime test. Floating-point exceptions, NaNs, rounding modes and game behavior may differ from upstream.
+
 <h1 align="center">
   <br>
   <a>
