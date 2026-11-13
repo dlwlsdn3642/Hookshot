@@ -82,21 +82,35 @@ def check_generator():
         for lanes in (2, 4):
             original = generated_shape(op, lanes)
             converted = a64_lift.op_text(original, set())
-            assert converted == (
+            optimized = (
                 f"    a64_nv_{op}32(c,c->vreg[0],c->vreg[1],"
                 + ("c->vreg[2]," if op != "sqrt" else "")
                 + f"{lanes});"
-            ), (op, lanes, converted)
+            )
+            expected = optimized if lanes == 4 and op != "div" else nv._BASE_OP_TEXT(original, set())
+            assert converted == expected, (op, lanes, converted)
             assert nv.replace_op(original + "return 0;") == original + "return 0;"
     for lanes in (2, 4):
         for lane in range(4):
             for subtract in (0, 1):
                 original = generated_lane_shape(lanes, lane, subtract)
                 final = a64_lift.op_text(original, set())
-                assert final == (
+                optimized = (
                     f"    a64_nv_fma32_lane(c,c->vreg[0],c->vreg[1],"
                     f"c->vreg[2],{lane},{lanes},{subtract});"
-                ), (lanes, lane, subtract, final)
+                )
+                expected = optimized if lanes == 4 else nv._BASE_OP_TEXT(original, set())
+                assert final == expected, (lanes, lane, subtract, final)
+
+    # Experimental 4S FDIV path can be toggled on for A/B measurements.
+    os.environ["A64_NATIVE_VECTOR_DIV"] = "1"
+    try:
+        d = generated_shape("div", 4)
+        assert "a64_nv_div32" in a64_lift.op_text(d, set())
+        assert a64_lift.op_text(generated_shape("div", 2), set()) == (
+            nv._BASE_OP_TEXT(generated_shape("div", 2), set()))
+    finally:
+        del os.environ["A64_NATIVE_VECTOR_DIV"]
 
     os.environ["A64_NO_NATIVE_VECTOR"] = "1"
     try:

@@ -7,7 +7,10 @@ FMLA matches this fork's existing native-FMA behavior; FDIV/FSQRT use the
 upstream FPCR/FPSR fast gate and conservative positive-normal checks, and
 fall back to the same lane helpers on every exceptional case.
 
-All vector data is loaded before writing the destination, including when
+Only 4S FMLA/FMLS and FSQRT are rewritten by default: 2S helpers
+were slower and FDIV was neutral in a synthetic x86-64-v3 benchmark.
+4S FDIV is opt-in via A64_NATIVE_VECTOR_DIV=1. All data is loaded before
+writing the destination, including when
 source and destination A64 registers alias. 2S operations zero the high D
 half as the A64 translator does. Other instructions remain unchanged.
 """
@@ -121,21 +124,25 @@ def replace_op(text):
         return text
     compact = _compact(text)
     for kind, rx in (("fma", _FMA), ("div", _DIV)):
+        # Vector FDIV was ~neutral in a synthetic CPU benchmark. Keep it
+        # opt-in until full game frame-time comparisons establish a gain.
+        if kind == "div" and os.environ.get("A64_NATIVE_VECTOR_DIV") != "1":
+            continue
         m = rx.fullmatch(compact)
-        if m and _check_store(m):
+        if m and m["k"] == "4" and _check_store(m):
             actual = "fms" if kind == "fma" and m.groupdict().get("neg") else kind
             return (
                 f"    a64_nv_{actual}32(c,c->vreg[{_dest(m)}],"
                 f"c->vreg[{m['a']}],c->vreg[{m['b']}],{m['k']});"
             )
     lane = _FMA_LANE.fullmatch(compact)
-    if lane and _check_lane_store(lane):
+    if lane and lane["k"] == "4" and _check_lane_store(lane):
         return (f"    a64_nv_fma32_lane(c,c->vreg[{lane['d']}],"
                 f"c->vreg[{lane['a']}],c->vreg[{lane['b']}],"
                 f"{int(lane['offset']) // 4},{lane['k']},"
                 f"{int(bool(lane['neg']))});")
     m = _SQRT.fullmatch(compact)
-    if m:
+    if m and m["k"] == "4":
         return f"    a64_nv_sqrt32(c,c->vreg[{m['d']}],c->vreg[{m['a']}],{m['k']});"
     return text
 
@@ -160,15 +167,19 @@ a64_nv_fma32(Ctx *A64_NOESC c, uint64_t *A64_NOESC dst, const uint64_t *A64_NOES
 #if defined(__FMA__) && defined(__SSE2__) && RECOMP_FPX_HOST == 2
     /* Exceptional NaNs, infinities, and subnormals take the original
        scalar hardware FMA: preserve its operand/NaN behavior exactly. */
-    unsigned normal = 1;
-    for (unsigned j = 0; j < lanes; ++j) {
-        const uint32_t aa = a[j] & 0x7fffffffu;
-        const uint32_t bb = b[j] & 0x7fffffffu;
-        const uint32_t zz = z[j] & 0x7fffffffu;
-        normal &= (aa == 0 || aa >= 0x00800000u) && aa < 0x7f800000u &&
-                  (bb == 0 || bb >= 0x00800000u) && bb < 0x7f800000u &&
-                  (zz == 0 || zz >= 0x00800000u) && zz < 0x7f800000u;
-    }
+    /* SSE2 integer mask: normal and subnormal inputs need no per-lane
+       scalar checks. Nonfinite inputs keep the original scalar helper's
+       NaN payload/exceptional behavior (especially zero times infinity). */
+    const __m128i am = _mm_set1_epi32(0x7fffffff);
+    const __m128i im = _mm_set1_epi32(0x7f7fffff);
+    const __m128i av = _mm_loadu_si128((const __m128i *)a);
+    const __m128i bv = _mm_loadu_si128((const __m128i *)b);
+    const __m128i zv = _mm_loadu_si128((const __m128i *)z);
+    const __m128i invalid = _mm_or_si128(
+        _mm_or_si128(_mm_cmpgt_epi32(_mm_and_si128(av, am), im),
+                     _mm_cmpgt_epi32(_mm_and_si128(bv, am), im)),
+        _mm_cmpgt_epi32(_mm_and_si128(zv, am), im));
+    unsigned normal = !_mm_movemask_epi8(invalid);
     if (RECOMP_LIKELY(normal)) {
         const __m128 va = _mm_castsi128_ps(_mm_loadu_si128((const __m128i *)a));
         const __m128 vb = _mm_castsi128_ps(_mm_loadu_si128((const __m128i *)b));
@@ -199,15 +210,15 @@ a64_nv_fma32_lane(Ctx *A64_NOESC c, uint64_t *A64_NOESC dst,
     if (subtract)
         for (unsigned j = 0; j < lanes; ++j) a[j] ^= 0x80000000u;
 #if defined(__FMA__) && defined(__SSE2__) && RECOMP_FPX_HOST == 2
-    const uint32_t sb = scalar & 0x7fffffffu;
-    unsigned normal = (sb == 0 || sb >= 0x00800000u) &&
-                      sb < 0x7f800000u;
-    for (unsigned j = 0; j < lanes; ++j) {
-        const uint32_t aa = a[j] & 0x7fffffffu;
-        const uint32_t zz = z[j] & 0x7fffffffu;
-        normal &= (aa == 0 || aa >= 0x00800000u) && aa < 0x7f800000u &&
-                  (zz == 0 || zz >= 0x00800000u) && zz < 0x7f800000u;
-    }
+    const __m128i am = _mm_set1_epi32(0x7fffffff);
+    const __m128i im = _mm_set1_epi32(0x7f7fffff);
+    const __m128i av = _mm_loadu_si128((const __m128i *)a);
+    const __m128i zv = _mm_loadu_si128((const __m128i *)z);
+    const __m128i invalid = _mm_or_si128(
+        _mm_cmpgt_epi32(_mm_and_si128(av, am), im),
+        _mm_cmpgt_epi32(_mm_and_si128(zv, am), im));
+    unsigned normal = ((scalar & 0x7fffffffu) < 0x7f800000u) &&
+                      !_mm_movemask_epi8(invalid);
     if (RECOMP_LIKELY(normal)) {
         const __m128 va = _mm_castsi128_ps(_mm_loadu_si128((const __m128i *)a));
         const __m128 vb = _mm_castsi128_ps(_mm_set1_epi32((int)scalar));
