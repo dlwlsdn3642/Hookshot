@@ -15,6 +15,7 @@
 **Fork note (AI):** Fork of [NotRexed/Hookshot](https://github.com/NotRexed/Hookshot).
 - **Change:** FP32/FP64 fused multiply-add uses native x86 FMA only; no ARM FPCR/FPSR compatibility fallback for these FMA operations.
 - Requires an FMA-capable CPU/build (x86-64-v3). Other floating-point operations are unchanged. Experimental; precision/flags may differ.
+- **Game-wide native NEON FP32 (experimental):** Native SSE/FMA for recognized 4S FMLA/FMLS (including indexed source-lane broadcasts) and 4S FSQRT; the existing scalar fallback handles nonfinite and exceptional inputs. 2S remains unchanged after CPU microbenchmarks showed regressions. 4S FDIV can be enabled for A/B measurement using A64_NATIVE_VECTOR_DIV=1 at lift time; the entire new pass can be disabled with A64_NO_NATIVE_VECTOR=1. Gameplay FPS validation is still required.
 - **Microphone FIR:** Replaces OoT's 1,025-tap filter and both 513-tap microphone filters with scalar native FMA loops. Input conversion, ring-buffer insertion, output scaling and clipping remain in the lifted game. Enabled only for the verified game build; unexpected ring indices retain the original lifted path.
 - **Builder updates:** Select `Update track -> None (this builder)` to skip official release downloads and build or rebuild games only with the bundled fork tools. This choice is saved, including for `--update`.
 
