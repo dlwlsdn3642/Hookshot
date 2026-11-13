@@ -30,6 +30,7 @@ import nso2  # noqa: F401  (DT_RELR)
 import insn
 import lift_fixes
 import suyu_rt_fixes
+import native_fma
 import chunks
 import standalone
 import adr_entries  # noqa: E402
@@ -44,6 +45,7 @@ import a64_rtgen
 insn.install()
 lift_fixes.install()
 suyu_rt_fixes.install()
+native_fma.install()
 
 
 def module_of(img, pc):

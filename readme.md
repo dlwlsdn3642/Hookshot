@@ -12,6 +12,10 @@
 <h4 align="center">The Legend of Zelda: Ocarina of Time (Nintendo Switch 2) running natively on Windows & Linux, with no emulator.
 </h4>
 
+**Fork note (AI):** Fork of [NotRexed/Hookshot](https://github.com/NotRexed/Hookshot).
+- **Change:** FP32/FP64 fused multiply-add uses native x86 FMA only; no ARM FPCR/FPSR compatibility fallback for these FMA operations.
+- Requires an FMA-capable CPU/build (x86-64-v3). Other floating-point operations are unchanged. Experimental; precision/flags may differ.
+
 
 <p align="center">
   <a href="#project-status">Status</a> |
