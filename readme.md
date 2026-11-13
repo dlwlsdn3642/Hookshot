@@ -15,7 +15,8 @@
 **Fork note (AI):** Fork of [NotRexed/Hookshot](https://github.com/NotRexed/Hookshot).
 - **Change:** FP32/FP64 fused multiply-add uses native x86 FMA only; no ARM FPCR/FPSR compatibility fallback for these FMA operations.
 - Requires an FMA-capable CPU/build (x86-64-v3). Other floating-point operations are unchanged. Experimental; precision/flags may differ.
-- **Microphone FIR:** Replaces OoT's 1,025-tap, per-sample filter dot-product with a native fused-accumulation loop. The original ring-buffer update, PCM conversion and output clipping remain in the lifted game. Enabled only for the verified game build; unexpected indices use the original lifted path.
+- **Microphone FIR:** Replaces OoT's 1,025-tap filter and both 513-tap microphone filters with scalar native FMA loops. Input conversion, ring-buffer insertion, output scaling and clipping remain in the lifted game. Enabled only for the verified game build; unexpected ring indices retain the original lifted path.
+- **Builder updates:** Select `Update track -> None (this builder)` to skip official release downloads and build or rebuild games only with the bundled fork tools. This choice is saved, including for `--update`.
 
 
 <p align="center">

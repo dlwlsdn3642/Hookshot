@@ -45,7 +45,8 @@ using PortableArchive = DigestFixture.UnusedPortableArchive;
         (root / "NuGet.Config").write_text("<configuration><packageSources><clear/></packageSources></configuration>", encoding="utf-8")
         project = root / "Fixture.csproj"
         project.write_text(PROJECT % "net8.0", encoding="utf-8")
-        restore = subprocess.run([dotnet, "restore", str(project), "--disable-build-servers"], capture_output=True, text=True)
+        restore = subprocess.run([dotnet, "restore", str(project), "--disable-build-servers"],
+                                 capture_output=True, text=True, encoding="utf-8", errors="replace")
         if restore.returncode and "NU1100" in restore.stdout + restore.stderr:
             if os.environ.get("GITHUB_ACTIONS") == "true":   # (as tests/run_all.py tells a runner from a PC)
                 raise SystemExit("on a GitHub runner the updater must build for the builder's net8.0, and its reference "

@@ -37,7 +37,7 @@ static class Updater
 
     // ---- the update tracks (the Track menu; by default the track of these tools). host/hos_update.c and
     // builder/linux/linux_update.py have the same rules ----
-    public const string Release = "release", Candidate = "rc", Nightly = "nightly";
+    public const string Release = "release", Candidate = "rc", Nightly = "nightly", None = "none";
     const string Releases = "https://api.github.com/repos/NotRexed/Hookshot/releases";
     static readonly System.Text.RegularExpressions.Regex NightlyName = new(@"-\d+-g[0-9a-f]+(-dirty)?$");
     static readonly System.Text.RegularExpressions.Regex ReleaseName = new(@"^v(\d+)\.(\d+)\.(\d+)(?:-rc\.(\d+))?$");
@@ -75,6 +75,7 @@ static class Updater
     /// an older version); for a release candidate only when it is newer, so it is never taken back to an older release
     public static string? Target(string? latest, string? tools, string track)
     {
+        if (track == None) return tools;   // Local-only: never target a GitHub release.
         if (latest == null) return tools;
         if (tools == null || track != Candidate || TrackOf(tools) != Candidate) return latest;
         return Newer(latest, tools) ? latest : tools;
@@ -84,6 +85,7 @@ static class Updater
     /// newest of the release candidates and releases, else the latest release; nightly: the nightly's setup list's tag
     public static async Task<string?> LatestTag(string track)
     {
+        if (track == None) return null;   // No HTTP requests in the local-only track.
         if (track == Release) return await LatestTag();
         using var http = new HttpClient { Timeout = TimeSpan.FromSeconds(8) };
         http.DefaultRequestHeaders.UserAgent.ParseAdd("HookshotBuilder");
@@ -208,6 +210,12 @@ static class Updater
         if (tools == null)
         {
             w.DownloadFailed("The Hookshot tools were not found next to this app.");
+            return;
+        }
+        if (w.LocalOnly)
+        {
+            // Rebuild with the running builder's bundled tools; no GitHub update or setup.
+            w.UpdateBuild(tools, folder);
             return;
         }
         // (just downloaded, but another release than asked for: the setup installed the release before it (GitHub's latest link lags
