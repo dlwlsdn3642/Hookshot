@@ -31,6 +31,7 @@ import insn
 import lift_fixes
 import suyu_rt_fixes
 import native_fma
+import native_vector
 import native_fir
 import chunks
 import standalone
@@ -47,6 +48,7 @@ insn.install()
 lift_fixes.install()
 suyu_rt_fixes.install()
 native_fma.install()
+native_vector.install()
 
 
 def module_of(img, pc):
