@@ -67,9 +67,7 @@ def fpx_header(used):
         '#error "Native FMA needs an FMA-capable build (RX_MARCH=x86-64-v3)."',
         "#endif",
     ]
-    return "
-".join(check + lines) + "
-"
+    return "\n".join(check + lines) + "\n"
 
 
 def install():
