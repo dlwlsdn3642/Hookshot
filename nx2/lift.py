@@ -31,6 +31,7 @@ import insn
 import lift_fixes
 import suyu_rt_fixes
 import native_fma
+import native_fir
 import chunks
 import standalone
 import adr_entries  # noqa: E402
@@ -178,6 +179,7 @@ def main():
         import oot_occlusion   # (no occlusion queries when HOOKSHOT_OCCLUSION_OFF=1: Fritchii's Occlusion Off)
         oot_occlusion.install(L, img)
     L.discover(max_insns=a.max_func)
+    native_fir.install(L, img, next((m["build_id"] for m in meta["modules"] if m["name"] == "main"), ""))
     print("discovered %d functions (%.0fs)" % (len(L.funcs), time.time() - t0))
     last[0] = time.time()
     total = coverage(L, img, img_dir)
