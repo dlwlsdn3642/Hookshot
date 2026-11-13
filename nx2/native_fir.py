@@ -1,4 +1,4 @@
-"""Reduce the OoT microphone's 1025-tap FIR loop to native scalar FMA.
+"""Reduce the OoT microphone's 1025- and 513-tap FIR loops to native scalar FMA.
 
 The guest function f_8338efe0 converts a PCM sample to float, inserts it in a
 1025-float ring, convolves the ring with 1025 float coefficients, then clips and
@@ -64,27 +64,138 @@ HOOK = r"""
     }
 """
 
+# f_8338d510 contains two additional 513-tap FIR paths. The computation is
+# identical; only its output scaling (S9 vs S8) differs after the loop.
+FIR513_FUNCTION = 0x8338D510
+FIR513_SITES = (
+    (0x8338D904, 0x8338D934),
+    (0x8338DE58, 0x8338DE88),
+)
+FIR513_WORDS = {
+    0x8338D650: 0x52804017,  # MOV W23,#512: first path ring wrap
+    0x8338DD90: 0x5280401A,  # MOV W26,#512: second path ring wrap
+    0x8338D8DC: 0xAA1F03E9,  # MOV X9,XZR
+    0x8338D8E8: 0x9120110A,  # ADD X10,X8,#0x804
+    0x8338D8FC: 0x2F00E400,  # MOVI D0,#0
+    0x8338D900: 0xB950090B,  # LDR W11,[X8,#0x1008]
+    0x8338D904: 0x2A0B03EC,  # MOV W12,W11
+    0x8338D908: 0x8B2C494D,  # ADD X13,X10,W12,UXTW #2
+    0x8338D90C: 0x7108059F,  # CMP W12,#513
+    0x8338D910: 0xBC696901,  # LDR S1,[X8,X9]
+    0x8338D914: 0x91001129,  # ADD X9,X9,#4
+    0x8338D918: 0x9A8A31AD,  # CSEL X13,X13,X10,LO
+    0x8338D91C: 0x7100058C,  # SUBS W12,W12,#1
+    0x8338D920: 0xBD4001A2,  # LDR S2,[X13]
+    0x8338D924: 0x1A8CB2EC,  # CSEL W12,W23,W12,LT
+    0x8338D928: 0x1F010040,  # FMADD S0,S2,S1,S0
+    0x8338D92C: 0xF120113F,  # CMP X9,#0x804
+    0x8338D930: 0x54FFFEC1,  # B.NE 0x8338d908
+    0x8338D934: 0x1E290800,  # FMUL S0,S0,S9
+    0x8338DE30: 0xAA1F03E9,  # MOV X9,XZR
+    0x8338DE3C: 0x9120110A,  # ADD X10,X8,#0x804
+    0x8338DE50: 0x2F00E400,  # MOVI D0,#0
+    0x8338DE54: 0xB950090B,  # LDR W11,[X8,#0x1008]
+    0x8338DE58: 0x2A0B03EC,  # MOV W12,W11
+    0x8338DE5C: 0x8B2C494D,  # ADD X13,X10,W12,UXTW #2
+    0x8338DE60: 0x7108059F,  # CMP W12,#513
+    0x8338DE64: 0xBC696901,  # LDR S1,[X8,X9]
+    0x8338DE68: 0x91001129,  # ADD X9,X9,#4
+    0x8338DE6C: 0x9A8A31AD,  # CSEL X13,X13,X10,LO
+    0x8338DE70: 0x7100058C,  # SUBS W12,W12,#1
+    0x8338DE74: 0xBD4001A2,  # LDR S2,[X13]
+    0x8338DE78: 0x1A8CB34C,  # CSEL W12,W26,W12,LT
+    0x8338DE7C: 0x1F010040,  # FMADD S0,S2,S1,S0
+    0x8338DE80: 0xF120113F,  # CMP X9,#0x804
+    0x8338DE84: 0x54FFFEC1,  # B.NE 0x8338de5c
+    0x8338DE88: 0x1E280800,  # FMUL S0,S0,S8
+}
+
+FIR513_HOOK_TEMPLATE = r"""
+    /* f_8338d510: 513-tap scalar FIR, keeping ARM FMADD order. */
+    if (__builtin_expect((uint32_t)c->x[12] < 513u, 1)) {
+        const uint64_t _fir513_coeff_base = c->x[8];
+        const uint64_t _fir513_ring_base = c->x[10];
+        const float *_fir513_h = (const float *)A64_PTR(_fir513_coeff_base);
+        const float *_fir513_x = (const float *)A64_PTR(_fir513_ring_base);
+        const uint32_t _fir513_start = (uint32_t)c->x[12];
+        uint32_t _fir513_index = _fir513_start;
+        float _fir513_sum = 0.0f;
+        for (uint32_t _fir513_k = 0; _fir513_k < 513u; ++_fir513_k) {
+            const float _fir513_coeff = _fir513_h[_fir513_k];
+            const float _fir513_sample = _fir513_x[_fir513_index];
+            _fir513_sum = __builtin_fmaf(_fir513_sample, _fir513_coeff, _fir513_sum);
+            _fir513_index = _fir513_index ? _fir513_index - 1u : 512u;
+            if ((_fir513_k & 63u) == 63u) A64_POLL(c);
+        }
+        /* The final LDR S1/S2 writes zero into their upper SIMD lanes. */
+        const uint32_t _fir513_last =
+            _fir513_start == 512u ? 0u : _fir513_start + 1u;
+        uint32_t _fir513_sum_bits, _fir513_h_bits, _fir513_x_bits;
+        memcpy(&_fir513_sum_bits, &_fir513_sum, sizeof(_fir513_sum_bits));
+        memcpy(&_fir513_h_bits, &_fir513_h[512], sizeof(_fir513_h_bits));
+        memcpy(&_fir513_x_bits, &_fir513_x[_fir513_last], sizeof(_fir513_x_bits));
+        a64_vset64(c->vreg[0], (uint64_t)_fir513_sum_bits);
+        a64_vset64(c->vreg[1], (uint64_t)_fir513_h_bits);
+        a64_vset64(c->vreg[2], (uint64_t)_fir513_x_bits);
+        c->x[9] = 0x804u;
+        c->x[12] = _fir513_index;
+        c->x[13] = _fir513_ring_base + ((uint64_t)_fir513_last << 2);
+        c->n = 0; c->z = 1; c->c = 1; c->v = 0; /* CMP X9,#0x804 */
+        goto L_@END@;
+    }
+"""
+
+
+def fir513_hook(end):
+    """Generate the same native dot product with the correct resume address."""
+    return FIR513_HOOK_TEMPLATE.replace("@END@", "%08x" % end)
+
 
 def install(lifter, img, build_id=None):
-    """Apply to a real lift, only if the complete guest instruction signature matches."""
-    # The build check is redundant with the words, but protects a future
-    # game image with identical byte patterns at accidentally reused addresses.
+    """Install matching 1025-tap and 513-tap loops for this verified build."""
     import oot_patches
+
     if build_id != oot_patches.LIFE_BUILD_ID:
         return False
-    if FUNCTION not in lifter.funcs:
+
+    use1025 = FUNCTION in lifter.funcs
+    use513 = FIR513_FUNCTION in lifter.funcs
+    if not (use1025 or use513):
         return False
-    body, labels = lifter.funcs[FUNCTION]
-    if (any(pc not in body or body[pc][1] != word for pc, word in WORDS.items())
-            or any(img.word(pc) != word for pc, word in WORDS.items())
-            or body[HOOK_AFTER][0][0] != "op" or POST_LOOP not in body):
-        raise RuntimeError("native_fir: supported build has an unexpected FIR loop; not patching")
-    if HOOK_AFTER in lifter.after:
-        raise RuntimeError("native_fir: f_8338efe0 loop hook already occupied")
-    # No local-register promotion for this one guest function: the hook's
-    # direct writes to Ctx must be visible to the original post-loop code.
-    lifter.no_local.add(FUNCTION)
-    labels.add(POST_LOOP)
-    lifter.after[HOOK_AFTER] = HOOK
-    print("native FIR: hooked f_8338efe0 1025-tap loop (guest %#x)" % HOOK_AFTER, flush=True)
+
+    # Validate every active hook before changing lifter state. Refuse to
+    # partially patch a different build or any unexpectedly edited function.
+    checks = []
+    if use1025:
+        checks.append((FUNCTION, WORDS, ((HOOK_AFTER, POST_LOOP),)))
+    if use513:
+        checks.append((FIR513_FUNCTION, FIR513_WORDS, FIR513_SITES))
+
+    for func, words, sites in checks:
+        body, _ = lifter.funcs[func]
+        if any(pc not in body or body[pc][1] != word or img.word(pc) != word
+               for pc, word in words.items()):
+            raise RuntimeError("native_fir: unexpected instruction in %08x" % func)
+        for after, resume in sites:
+            if (body[after][0][0] != "op" or resume not in body
+                    or after in lifter.after):
+                raise RuntimeError("native_fir: invalid/occupied loop at %08x" % after)
+
+    if use1025:
+        _, labels = lifter.funcs[FUNCTION]
+        lifter.no_local.add(FUNCTION)
+        labels.add(POST_LOOP)
+        lifter.after[HOOK_AFTER] = HOOK
+        print("native FIR: hooked f_8338efe0 1025-tap loop", flush=True)
+
+    if use513:
+        _, labels = lifter.funcs[FIR513_FUNCTION]
+        # Hooks update the guest register file directly; disabling per-function
+        # register promotion keeps lifted code and the new path consistent.
+        lifter.no_local.add(FIR513_FUNCTION)
+        for after, resume in FIR513_SITES:
+            labels.add(resume)
+            lifter.after[after] = fir513_hook(resume)
+        print("native FIR: hooked f_8338d510 two 513-tap loops", flush=True)
+
     return True
