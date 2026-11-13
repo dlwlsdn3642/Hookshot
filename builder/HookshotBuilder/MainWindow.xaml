@@ -190,9 +190,9 @@
             <!-- (the update track, Updater.cs: Release, Release candidate or Nightly; the builder updates from it, saved once chosen) -->
             <StackPanel Grid.Row="1" Orientation="Horizontal" Margin="0,12,0,0" VerticalAlignment="Center">
               <TextBlock x:Name="TrackLabel" Style="{StaticResource Label}" Text="UPDATE TRACK" VerticalAlignment="Center" Margin="0,0,12,0"/>
-              <ComboBox x:Name="TrackBox" Width="180" Style="{StaticResource Choice}" IsEditable="False"
+              <ComboBox x:Name="TrackBox" Width="200" Style="{StaticResource Choice}" IsEditable="False"
                         AutomationProperties.Name="Update track" AutomationProperties.LabeledBy="{Binding ElementName=TrackLabel}"
-                        ToolTip="Release: the tested versions. Release candidate: the next version, to try before it is released. Nightly: the newest development build, updated with every change."/>
+                        ToolTip="Release: the tested versions. Release candidate: upcoming builds. Nightly: development builds. None (this builder): skip all builder updates, build and rebuild using these local tools."/>
             </StackPanel>
             <!-- (make_game.py's last step, the game's prepare-shaders run: unticked, the game prepares them at its first start) -->
             <CheckBox x:Name="PrepareTick" Grid.Row="1" Grid.Column="2" Grid.ColumnSpan="3" Style="{StaticResource Tick}" Content="Prepare shaders now"

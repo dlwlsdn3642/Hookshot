@@ -222,6 +222,17 @@ namespace DigestFixture
 
         static async Task Main()
         {
+            await Case("none-track-uses-local-builder", async s =>
+            {
+                s.Window.LocalOnly = true;
+                Check(await Updater.LatestTag(Updater.None) == null, "None track queried releases.");
+                Check(Updater.Target("v9.9.9", "fork-test", Updater.None) == "fork-test",
+                      "None track selected an upstream release.");
+                Check(await s.FolderRun() == "local", "None track did not use the current Builder.");
+                Check(s.Handler.Requests.Count == 0 && s.Starts.Count == 0, "None track downloaded or launched a setup.");
+                Check(File.ReadAllBytes(s.Setup).SequenceEqual(s.Old), "None track replaced the cached setup.");
+                s.NoPartial();
+            });
             await Case("setup-corrupt-no-use", async s =>
             {
                 var bad = (byte[])s.Good.Clone(); bad[0] ^= 1;
@@ -349,10 +360,15 @@ namespace HookshotBuilder
 
     sealed class MainWindow
     {
+        public bool LocalOnly { get; set; }
         public CancellationToken DownloadToken => DigestFixture.State.Current.Cancel.Token;
         public void Note(string _) { }
         public void BeginUpdate(string folder, string? tag) { }
-        public void UpdateBuild(Tools tools, string folder) => throw new Exception("Unexpected real build path.");
+        public void UpdateBuild(Tools tools, string folder)
+        {
+            if (LocalOnly) { DigestFixture.State.Current.Outcome.TrySetResult("local"); return; }
+            throw new Exception("Unexpected real build path.");
+        }
         public void DownloadProgress(double value) => DigestFixture.State.Current.Progress.Add(value);
         public void DownloadFailed(string reason) => DigestFixture.State.Current.Outcome.TrySetResult(reason);
     }

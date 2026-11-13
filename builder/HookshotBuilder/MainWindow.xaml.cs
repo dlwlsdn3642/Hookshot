@@ -120,7 +120,11 @@ public partial class MainWindow : Window
         ShowMain();
         if (Environment.GetEnvironmentVariable("HOOKSHOT_UI_PREVIEW") is { Length: > 0 } preview) { Preview(preview); return; }
         CheckAll();
-        latestTag = Environment.GetEnvironmentVariable("HOOKSHOT_LATEST_TAG") is { Length: > 0 } fake ? (fake == "none" ? null : fake) : await Updater.LatestTag(Track);
+        var track = Track;
+        var tag = track == Updater.None ? null :
+            Environment.GetEnvironmentVariable("HOOKSHOT_LATEST_TAG") is { Length: > 0 } fake ? (fake == "none" ? null : fake) : await Updater.LatestTag(track);
+        if (Track != track) return;
+        latestTag = tag;
         RefreshMode();
     }
 
@@ -154,7 +158,7 @@ public partial class MainWindow : Window
     // ================= what the button does: build, update the game, play it, or get the newer builder =================
     // (as NX2navi's launcher: whatever version the player opens, it checks the latest release and says what is there)
 
-    enum Mode { Build, UpdateGame, UpToDate, UpdateBuilder }
+    enum Mode { Build, RebuildLocal, UpdateGame, UpToDate, UpdateBuilder }
     Mode mode = Mode.Build;
     string? latestTag, updateTarget;
     bool sourcePicked;   // (the player chose game files here: a build from them, even over a game that is up to date)
@@ -180,12 +184,18 @@ public partial class MainWindow : Window
         var builder = Tools.Find()?.Version;
         // (the newest release known: GitHub's, else this builder's own. v2.0.0 took a GitHub that did not answer for "up to date")
         updateTarget = Updater.Target(latestTag, builder, Track);
-        if (game != null && updateTarget != null && game != updateTarget && !sourcePicked) mode = Mode.UpdateGame;
+        if (LocalOnly) mode = game != null && !sourcePicked ? Mode.RebuildLocal : Mode.Build;
+        else if (game != null && updateTarget != null && game != updateTarget && !sourcePicked) mode = Mode.UpdateGame;
         else if (game != null && !sourcePicked) mode = Mode.UpToDate;
         else if (latestTag != null && builder != null && builder != updateTarget) mode = Mode.UpdateBuilder;
         else mode = Mode.Build;
         switch (mode)
         {
+            case Mode.RebuildLocal:
+                FilesTitle.Text = "Rebuild with this builder";
+                FilesSub.Text = "Use this builder's local tools to rebuild your existing game. No builder update is downloaded.";
+                BuildButton.Content = "Rebuild with this builder";
+                break;
             case Mode.UpdateGame:
                 FilesTitle.Text = "Update available";
                 FilesSub.Text = $"Hookshot {updateTarget} is available. Your game is {game}: Update builds it again from the game files kept in " +
@@ -233,6 +243,14 @@ public partial class MainWindow : Window
         LaunchVersion.Text = (game != null ? $"Hookshot {game}" : "Hookshot") + " · " + folder;
         LaunchPlay.IsEnabled = File.Exists(GameExe(folder));
         ShowPage(LaunchPage);
+        if (LocalOnly)
+        {
+            latestTag = null;
+            updateTarget = Tools.Find()?.Version;
+            LaunchUpdate.Visibility = Visibility.Collapsed;
+            LaunchStatus.Text = "Updates disabled (None). Use this builder to rebuild locally.";
+            return;
+        }
         latestTag = Environment.GetEnvironmentVariable("HOOKSHOT_LATEST_TAG") is { Length: > 0 } fake ? (fake == "none" ? null : fake) : await Updater.LatestTag(Track);
         updateTarget = Updater.Target(latestTag, Tools.Find()?.Version, Track);   // (GitHub's newest, else this builder's own)
         if (updateTarget == null) LaunchStatus.Text = "Could not check for updates (GitHub did not answer)";
@@ -281,8 +299,8 @@ public partial class MainWindow : Window
     }
 
     // ---- the update track (Updater.cs): the one chosen in the Track menu, saved; by default these tools' own ----
-    static readonly string[] TrackIds = { Updater.Release, Updater.Candidate, Updater.Nightly };
-    static readonly string[] TrackNames = { "Release", "Release candidate", "Nightly" };
+    static readonly string[] TrackIds = { Updater.Release, Updater.Candidate, Updater.Nightly, Updater.None };
+    static readonly string[] TrackNames = { "Release", "Release candidate", "Nightly", "None (this builder)" };
     string? chosenTrack;
     string Track
     {
@@ -293,8 +311,10 @@ public partial class MainWindow : Window
             return saved != null && TrackIds.Contains(saved) ? saved : Updater.TrackOf(Tools.Find()?.Version);
         }
     }
+    // None is a persisted local-only setting, including for --update from the game.
+    internal bool LocalOnly => Track == Updater.None;
     /// (a track other than these tools' own: its newest is installed, even an older version)
-    bool Switching => Track != Updater.TrackOf(Tools.Find()?.Version);
+    bool Switching => !LocalOnly && Track != Updater.TrackOf(Tools.Find()?.Version);
 
     async void TrackChanged(object sender, SelectionChangedEventArgs e)
     {
@@ -303,7 +323,10 @@ public partial class MainWindow : Window
         SaveSettings();
         latestTag = null;
         RefreshMode();
-        latestTag = await Updater.LatestTag(Track);
+        var track = Track;
+        var tag = await Updater.LatestTag(track);
+        if (Track != track) return;  // Ignore an older request after switching tracks.
+        latestTag = tag;
         RefreshMode();
     }
 
@@ -847,6 +870,10 @@ public partial class MainWindow : Window
     {
         switch (mode)
         {
+            case Mode.RebuildLocal:
+                SaveSettings();
+                Updater.UpdateFolder(this, OutPath.Text, Tools.Find()?.Version, fetched: false);
+                return;
             case Mode.UpdateGame:   // (the kept game files; the newer builder first when this one is older)
                 if (!OlderOk(GameVersion(OutPath.Text))) return;
                 SaveSettings();
